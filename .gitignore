@@ -1,0 +1,18 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor/tooling folders that may appear if this vault is opened in an editor
+.vscode/
+.obsidian/
+.idea/
+
+# Temporary/swap files
+*.tmp
+*.swp
+*~
+
+# Never commit secrets, even by accident
+.env
+.env.*
