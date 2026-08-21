@@ -27,6 +27,21 @@ export interface BotContext {
 
 The payoff (detailed further in [Architecture](02-architecture.md)) is that every handler is testable with a plain fake object — no grammY internals, no network, and a test can assert on exact recorded message text and keyboard contents.
 
+### Which Telegram Bot API methods actually get called
+
+grammY hides the raw HTTP, but every `BotContext` method still resolves to one specific [Telegram Bot API](https://core.telegram.org/bots/api) method underneath:
+
+| `BotContext` method | Telegram Bot API method | Notes |
+|---|---|---|
+| `sendMessage` | `sendMessage` | Always used for a fresh message |
+| `updateMessage` | `editMessageText`, falling back to `sendMessage` | Falls back if the message is too old to edit, or unchanged ("message is not modified") |
+| `answerCallbackQuery` | `answerCallbackQuery` | With `show_alert` for the errors/toasts that need to interrupt (search-help, invalid-navigation), without it for the routine acknowledgment every callback handler does first |
+| `sendTyping` | `sendChatAction` (`action: "typing"`) | Best-effort — failures are swallowed, never blocks the real reply |
+| `deleteMessages` | `deleteMessage`, once per message ID | `/clear`'s sweep and document-overflow cleanup both loop this; each individual failure (already gone, too old) is swallowed rather than aborting the batch |
+| `downloadDocument` | `getFile`, then a plain HTTPS `GET` | `getFile` (Bot API) resolves a `file_id` to a `file_path`; the actual bytes come from a *separate*, non-API endpoint: `https://api.telegram.org/file/bot<token>/<file_path>` |
+
+Two more Bot API methods are called outside `BotContext`, directly against `bot.api`: **`getMe`** once per cold start (`bot.init()`, required before `handleUpdate` will work), and the four methods behind `/api/telegram/setup` below.
+
 ## Stateless navigation via `callback_data`
 
 Every inline button encodes everything its handler needs directly into `callback_data` — no server-side lookup table, because any Vercel invocation might handle the tap, with nothing remembered from when the button was created.
@@ -72,6 +87,15 @@ This exact pipeline is shared between opening a document from the knowledge base
 
 Early on, opening the bot always showed the top-level `mastery`/`antonio` folder structure, requiring an extra tap through a folder that (for a given user) usually had exactly one thing in it. `renderDirectory()`'s root-collapse logic now walks straight through any level that has exactly one visible entry, up to a bounded depth (`MAX_ROOT_COLLAPSE_DEPTH`), landing the user directly on their real content instead of a chain of single-item menus.
 
-## Command menu registration
+## `/api/telegram/setup`: one route, four HTTP methods, four Bot API calls
 
-`PUT /api/telegram/setup` calls `setMyCommands()` to register the `/` autocomplete menu (`BOT_COMMANDS` in `src/telegram/commands.ts`) — a step that has to be **re-run** any time a new top-level command is added, since Telegram doesn't infer the menu from what the bot happens to handle. This was the source of a real, if minor, bug: `/clear` and later `/save` were fully functional but invisible in Telegram's `/` menu for a while after being added, until `/setup` was called again with the updated list.
+This is the operator-only route (never called by Telegram or by end users) for standing the bot up and inspecting its webhook state. Every method requires an `X-Setup-Secret` header matching `TELEGRAM_SETUP_SECRET` — deliberately a *different* secret from `TELEGRAM_WEBHOOK_SECRET` (see [Architecture](02-architecture.md)) — and maps 1:1 to a Bot API call via `src/telegram/setupHandler.ts`:
+
+| HTTP method | Bot API method | Purpose |
+|---|---|---|
+| `POST` (body: `{ "url": "https://..." }`) | `setWebhook` | Points Telegram at `/api/telegram/webhook`, with `TELEGRAM_WEBHOOK_SECRET` registered as the secret token Telegram must echo back on every update |
+| `DELETE` | `deleteWebhook` | Stops Telegram from delivering updates at all — used to take the bot offline deliberately |
+| `PUT` | `setMyCommands` | Registers the `/` autocomplete menu (`BOT_COMMANDS` in `src/telegram/commands.ts`) |
+| `GET` | `getWebhookInfo` | Reports the currently registered webhook URL, pending update count, and the last delivery error Telegram recorded — the same data `curl`ed directly against Telegram's API during the diagnostic in [Lessons & Bugs](08-lessons-and-bugs.md) |
+
+`PUT` (command registration) has to be **re-run** any time a new top-level command is added, since Telegram doesn't infer the menu from what the bot happens to handle. This was the source of a real, if minor, bug: `/clear` and later `/save` were fully functional but invisible in Telegram's `/` menu for a while after being added, until `/setup` was called again with the updated list.

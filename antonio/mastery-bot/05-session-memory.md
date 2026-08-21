@@ -82,6 +82,8 @@ export class RedisSessionStore implements SessionStore {
 
 `RedisLike` (a `Pick<Redis, "get" | "set" | "del">`) keeps the same test-fake-friendly pattern used everywhere else in the app — tests construct `RedisSessionStore` against a plain in-memory `Map`-backed fake, never a real Redis connection.
 
+There's no persistent connection to Redis at all, which matters for a serverless function that may cold-start on every request: `@upstash/redis`'s client talks **REST over HTTPS**, not the normal Redis wire protocol — each `get`/`set`/`del` is one `POST` to Upstash's REST endpoint (`KV_REST_API_URL`), authenticated with `KV_REST_API_TOKEN` as a bearer token, command and arguments sent as a JSON array in the body. No connection pool to manage, nothing to leak across invocations, nothing to reconnect on a cold start — the same request/response shape as every other API this app calls.
+
 No TTL is set on session keys — a deliberate choice given the tiny data volume (four users, short transcripts) and the explicit design goal of "persists until `/clear`," not "persists for some arbitrary window." For a much larger user base this would need revisiting.
 
 ## What each version got right

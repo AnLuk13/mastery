@@ -90,6 +90,8 @@ export interface ChatCompletionOptions {
 }
 ```
 
+Underneath, every call — `/ask`, `/save`'s decisions, the fallback — is exactly one request to Groq's single, OpenAI-compatible endpoint: **`POST https://api.groq.com/openai/v1/chat/completions`**, authenticated with `Authorization: Bearer <GROQ_API_KEY>`. The request body always carries `model`, `messages`, `temperature: 0.2`, and `max_tokens: 700` (well under Telegram's 4096-character single-message limit); `reasoning_effort` and `response_format: { type: "json_object" }` are added only when the caller opts in via `ChatCompletionOptions`, since compound models 400 on the former. `GroqClient` reads Groq's rate-limit snapshot directly off the response **headers** (`x-ratelimit-remaining-requests`, `x-ratelimit-limit-requests`, `x-ratelimit-remaining-tokens`, `x-ratelimit-limit-tokens`) rather than the body — that's the same data surfaced by the 📊 Groq limits button and fed into `describeAskError`'s retry-time wording.
+
 ### The empty-completion bug
 
 `openai/gpt-oss-120b` is a *reasoning* model — it spends part of its token budget on a hidden reasoning pass before producing the visible answer. Without capping that (`reasoning_effort: "low"`), the hidden pass alone could exhaust `max_tokens`, leaving the visible `content` field **empty**. `GroqClient` now defensively throws `GroqUnavailableError` if a completion's trimmed content is empty, and `/save`'s calls always pass `reasoningEffort: "low"` — a bug that was invisible until tested against a real model with reasoning enabled, since nothing about the API response *looked* wrong (200 OK, valid JSON, just an empty string).

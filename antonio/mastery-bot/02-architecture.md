@@ -46,6 +46,8 @@ PUT  /api/telegram/setup     ← operator-only: (re)configures Telegram's webhoo
 
 `TELEGRAM_WEBHOOK_SECRET` (sent by Telegram on every request, verified by the webhook route) is deliberately a *separate* secret from `TELEGRAM_SETUP_SECRET` (used by the operator to call `/setup`) — one is inbound-from-Telegram, the other is outbound-from-you; conflating them would mean a leaked webhook secret also grants the ability to redirect the bot's webhook elsewhere.
 
+That verification (`secureCompare`, `src/lib/secureCompare.ts`) is constant-time on purpose — comparing an attacker-controlled header value against a real secret with `===` or `string.includes` leaks the secret one byte at a time through response-time differences. It SHA-256-hashes both sides first, then compares the fixed-length digests with Node's `crypto.timingSafeEqual` — hashing first sidesteps `timingSafeEqual`'s own requirement that both buffers be equal length (unequal-length secrets would otherwise throw, or — if length were checked first as a shortcut — leak the correct length through timing anyway).
+
 `getInitializedBot()` / `getBotApi()` (`botInstance.ts`) hold a module-scope singleton `Bot` instance, reused across warm invocations purely as a cold-start optimization — never a correctness dependency, since a fresh cold start rebuilds the exact same thing.
 
 ## Configuration as a single validated surface
