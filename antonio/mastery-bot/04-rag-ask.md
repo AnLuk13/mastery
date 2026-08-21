@@ -43,9 +43,19 @@ The model files are committed under `public/models/` and bundled into the deploy
 
 ## The embeddings index is precomputed, not built live
 
-`scripts/buildEmbeddingsIndex.ts` (run manually via `npm run build:index`, and required after any content change) walks the entire local content root, chunks every document, embeds every chunk with the same model the live bot uses, and writes the result to `src/rag/data/embeddingsIndex.json` — which gets **committed and deployed like any other source file**.
+`scripts/buildEmbeddingsIndex.ts` walks the entire content root, chunks every document, embeds every chunk with the same model the live bot uses, and writes the result to `src/rag/data/embeddingsIndex.json` — which gets **committed and deployed like any other source file**.
 
-This was a deliberate choice, not a shortcut: embedding an entire knowledge base on every chat request would be slow and wasteful when the corpus only changes when notes are edited. The cost is that the index goes stale the moment content changes without a rebuild — an accepted trade-off for a personal knowledge base that changes in bursts (editing sessions), not continuously.
+This was a deliberate choice, not a shortcut: embedding an entire knowledge base on every chat request would be slow and wasteful when the corpus only changes when notes are edited. The cost is that the index goes stale the moment content changes without a rebuild.
+
+### Keeping it fresh: a scheduled GitHub Action, not a manual step
+
+The first version of this required manually running `npm run build:index`, committing the result, and redeploying — genuinely easy to forget, especially once four people were saving notes through `/save` and none of those writes went anywhere near the `mastery-bot` repo or its deploy pipeline.
+
+`.github/workflows/reindex.yml` (in the `mastery-bot` repo) now automates the whole loop: on a schedule (every 30 minutes, plus a manual "run now" via `workflow_dispatch`), it checks out both repos, reruns `buildEmbeddingsIndex.ts` against the current `mastery` content, and — only if the resulting index actually changed — commits it and triggers a Vercel production deploy via a **deploy hook** (a single-purpose, easily-revocable trigger URL, deliberately not a broad Vercel API token).
+
+This needed exactly one new credential: a **read-only, fine-grained GitHub PAT scoped to just the `mastery` repo** (`Contents: read`), stored as the `CONTENT_REPO_TOKEN` secret on `mastery-bot`, used only to check out the private content repo during the workflow run — the push back to `mastery-bot` itself uses GitHub Actions' own automatic per-run token, which already has write access to the repo the workflow lives in, so no second write-scoped secret was needed for that half.
+
+The remaining trade-off is now a bounded delay (up to ~30 minutes) between saving a note and it becoming answerable via `/ask`, rather than an indefinite one waiting on someone to remember a manual step.
 
 ## Retrieval
 

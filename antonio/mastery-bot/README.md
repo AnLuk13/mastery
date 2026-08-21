@@ -28,7 +28,8 @@ This isn't user documentation for the bot — it's *engineering* documentation f
 | LLM | [Groq](https://groq.com) (two models: `openai/gpt-oss-120b`, `groq/compound-mini`) | Fast + cheap inference; the compound model adds live web search with no separate search API |
 | Ambient memory | Upstash Redis (via Vercel's marketplace integration) | The only piece of real server-side state in an otherwise stateless app |
 | Testing | Vitest, dependency injection everywhere | Every handler takes plain interfaces, so tests use fakes, not mocks or network calls |
+| Reindexing | A scheduled GitHub Action (`.github/workflows/reindex.yml`) | Keeps `/ask`'s embeddings index in sync with the content repo automatically, instead of a manual rebuild-and-redeploy step |
 
 ## A note on scope
 
-This documentation covers the *whole* build, end to end — from the original directory-browsing foundation through RAG chat, live web search, chat-driven authoring, per-folder privacy, ambient session memory, and the most recent reorganize-proposal feature. It reflects the codebase as it stands after that work, not a snapshot from partway through.
+This documentation covers the *whole* build, end to end — from the original directory-browsing foundation through RAG chat, live web search, chat-driven authoring, per-folder privacy, ambient session memory, the reorganize-proposal feature, and automated reindexing. It reflects the codebase as it stands after that work, not a snapshot from partway through.
