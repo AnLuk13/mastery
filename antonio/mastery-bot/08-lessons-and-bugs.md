@@ -13,6 +13,7 @@ A log of the sharper bugs and reversals from building this — the ones worth re
 | A cold-start editor with no existing files got a new note saved flat instead of into a topic folder | [Save & Authoring](06-save-authoring.md) |
 | A plain-text "edit" request went through `/ask` (which never writes) and looked saved when it wasn't | [Save & Authoring](06-save-authoring.md) |
 | `groq/compound-mini` rejects `reasoning_effort`; `openai/gpt-oss-120b` needs it or risks an empty completion | [RAG & /ask](04-rag-ask.md) |
+| `groq/compound-mini`'s 250-requests-*per-day* cap (shared across every user) made `/ask` fail on every question once exhausted; fixed with a fallback model | [RAG & /ask](04-rag-ask.md), below |
 
 ## Vercel's `KV_REST_API_*` naming, not `UPSTASH_REDIS_REST_*`
 
@@ -47,6 +48,12 @@ An early draft of `/save`'s decision schema tried two `write` branches distingui
 ## The ONNX runtime native binary vanished from the Vercel deploy
 
 `@huggingface/transformers` pulls in `onnxruntime-node`, whose actual inference engine is a native binary (`libonnxruntime.so.1`) loaded via `dlopen` at the OS level — invisible to Vercel's static file tracer, which only follows `require`/`import` graphs. The result: the function deployed successfully, imported fine, and then threw `libonnxruntime.so.1: cannot open shared object file` the moment it actually tried to embed something, in production only (nothing about this could reproduce locally, where the file is just present on disk). The fix is an explicit `outputFileTracingIncludes` entry in `next.config.ts` forcing the binary to be bundled for both webhook routes — `/api/telegram/setup` needed it too, not just `/api/telegram/webhook`, because constructing the bot for *either* route transitively imports the embedding model even though `/setup` never actually calls it at runtime.
+
+## A per-minute-looking limit that was actually per-day, shared across everyone
+
+`groq/compound-mini`'s free-tier limits looked comfortable at a glance — 70,000 tokens/minute is a lot for a personal bot. The number that actually mattered was easy to miss: **250 requests per day**, not per minute, and — because Groq rate-limits by API key, not by caller — that cap is shared across all four people using the bot, not 250 *each*. The failure mode this produces is deceptive: everything works fine in light testing, then one day of real multi-person use exhausts the daily cap, and from that point on **every single question fails**, indistinguishable at a glance from a broken deployment rather than an exhausted quota. `/save`'s model, on the same free tier, gets 14,400 requests/day — nearly 60× more headroom — which is why only `/ask` ever showed this symptom.
+
+The fix (detailed in [RAG & /ask](04-rag-ask.md)) wasn't to just wait out the reset or upgrade the account tier, but to make the failure mode graceful: fall back to the higher-capacity model, answer without live web search rather than not at all, and say so plainly in both the answer (a visible notice) and the error path (a message that names it as a shared, bot-wide limit rather than something the asker did). The broader lesson: a rate limit's *headline* number (tokens/minute, here) isn't necessarily the one that binds in practice — the daily request cap was the actual constraint, and it only became visible by hitting it for real, not by reading the number that looked most prominent in the pricing page.
 
 ## `llama-3.3-70b-versatile` quietly stopped existing on Groq
 

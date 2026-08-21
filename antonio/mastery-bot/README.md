@@ -25,7 +25,7 @@ This isn't user documentation for the bot — it's *engineering* documentation f
 | Validation | Zod | Every external input — env vars, API responses, callback data, model output — is untrusted until parsed |
 | Content source of truth | A separate GitHub repo (`mastery`), read/written via the REST API | Durable storage the serverless app itself doesn't have |
 | Embeddings | `@huggingface/transformers` running `Xenova/all-MiniLM-L6-v2` locally | Free, offline, deterministic — no embeddings API, no per-call cost |
-| LLM | [Groq](https://groq.com) (two models: `openai/gpt-oss-120b`, `groq/compound-mini`) | Fast + cheap inference; the compound model adds live web search with no separate search API |
+| LLM | [Groq](https://groq.com) (two models: `openai/gpt-oss-120b`, `groq/compound-mini`) | Fast + cheap inference; the compound model adds live web search with no separate search API — and `gpt-oss-120b` doubles as `/ask`'s fallback when compound-mini's much stricter daily quota runs out |
 | Ambient memory | Upstash Redis (via Vercel's marketplace integration) | The only piece of real server-side state in an otherwise stateless app |
 | Testing | Vitest, dependency injection everywhere | Every handler takes plain interfaces, so tests use fakes, not mocks or network calls |
 | Reindexing | A scheduled GitHub Action (`.github/workflows/reindex.yml`) | Keeps `/ask`'s embeddings index in sync with the content repo automatically, instead of a manual rebuild-and-redeploy step |

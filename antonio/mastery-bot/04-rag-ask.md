@@ -94,6 +94,32 @@ export interface ChatCompletionOptions {
 
 `openai/gpt-oss-120b` is a *reasoning* model — it spends part of its token budget on a hidden reasoning pass before producing the visible answer. Without capping that (`reasoning_effort: "low"`), the hidden pass alone could exhaust `max_tokens`, leaving the visible `content` field **empty**. `GroqClient` now defensively throws `GroqUnavailableError` if a completion's trimmed content is empty, and `/save`'s calls always pass `reasoningEffort: "low"` — a bug that was invisible until tested against a real model with reasoning enabled, since nothing about the API response *looked* wrong (200 OK, valid JSON, just an empty string).
 
+### A third role for `GROQ_MODEL`: fallback when compound-mini's quota runs out
+
+`groq/compound-mini` looks generous at a glance (70,000 tokens/minute on the free tier), but its **request** cap is much stricter than it first appears: **250 requests per day**, full stop — not per minute, per *day*, and shared across every user of the bot, since Groq rate-limits by API key, not by caller. `openai/gpt-oss-120b`, by contrast, gets 14,400 requests/day on the same free tier. With four people actually using `/ask`, 250/day is easy to exhaust — and once it is, **every** question fails until Groq's daily reset, which is exactly what surfaced this: a "⚠️ Too many questions at once" error on every single message, not just occasional throttling.
+
+Rather than raising the account tier (a cost decision, not a code one) or failing outright until reset, `answerQuestion()` now falls back to the same `GroqClient` instance `/save` already uses whenever the primary call fails with a rate limit *or* a generic outage:
+
+```ts
+// src/rag/answerQuestion.ts
+try {
+  ({ text, rateLimit } = await deps.groq.createChatCompletion(messages)); // compound-mini
+} catch (error) {
+  if (!deps.fallbackGroq || !(error instanceof GroqRateLimitedError || error instanceof GroqUnavailableError)) {
+    throw error;
+  }
+  ({ text, rateLimit } = await deps.fallbackGroq.createChatCompletion(fallbackMessages, { reasoningEffort: "low" }));
+  usedFallback = true;
+}
+```
+
+The fallback answer still uses retrieved notes, the reference document, and conversation history exactly as normal — it just can't run a live web search, since `gpt-oss-120b` doesn't have that built in the way the compound model does. Two details make this honest rather than silently degraded:
+
+- The **system prompt sent to the fallback** omits the "you have live web search available" paragraph entirely (`buildSystemPrompt(hasWebSearch: boolean)`) — otherwise a non-agentic model could hallucinate having searched when it never did.
+- The **reply itself carries a visible notice** — "⚠️ Answered without live web search — today's request limit was reached" — appended to the answer (dropped gracefully if it would push the message over Telegram's length limit), so a degraded answer never looks identical to a normal one.
+
+If the fallback *also* fails, the error message was made specific too — rather than a vague "too many questions," it now says plainly that this is a **shared, bot-wide Groq limit**, not something the asker did, and includes the retry-after time when Groq's response provides one.
+
 ## Prompt construction
 
 `answerQuestion()`'s prompt has three optional blocks, each framed distinctly so the model doesn't conflate them:
